@@ -9,36 +9,16 @@ const c = @cImport({
 });
 
 fn print() void {
-    _ = c.printf(
-        " B:%d%c V:%d %s \n",
-        batcapacity,
-        batstatus,
-        vollevel,
-        @as([*c]u8, datestr.ptr),
-    );
+    _ = c.printf(" B:%d V:%d %s \n", fBatCapacity, fVolume, @as([*c]u8, fDateStr.ptr));
+    _ = c.fflush(c.stdout);
 }
 
-var bsfd: c_int = undefined;
 var bcfd: c_int = undefined;
-var batstatus: u8 = undefined; // 'C' or 'D'
-var batcapacity: u8 = 0;
-fn readBatteryState() void {
-    // Read bat status
-    var status: u8 = undefined;
-    _ = c.lseek(bsfd, 0, c.SEEK_SET);
-    var nread: i8 = @intCast(c.read(bsfd, &status, 1));
-    if (nread < 1) @panic("read bsfd");
-
-    batstatus = switch (status) {
-        'C' => '+',
-        'D' => '-',
-        else => 0,
-    };
-
-    // Read bat capacity
+var fBatCapacity: u8 = 0;
+fn readBatCapacity() void {
     var buf: [8]u8 = undefined;
     _ = c.lseek(bcfd, 0, c.SEEK_SET);
-    nread = @intCast(c.read(bcfd, &buf, 8));
+    const nread: i8 = @intCast(c.read(bcfd, &buf, 8));
     if (nread < 1) @panic("read bcfd");
 
     const n: usize = @intCast(nread);
@@ -51,19 +31,18 @@ fn readBatteryState() void {
     const value: c_long = c.strtol(&buf, &endptr, 10);
     if (endptr == @as([*c]u8, @ptrCast(&buf))) @panic("strtol");
 
-    batcapacity = @intCast(value);
+    fBatCapacity = @intCast(value);
 }
 
 var mixer: ?*c.snd_mixer_t = null;
 var vol_min: f64 = 0;
 var vol_max: f64 = 0;
-
-var vollevel: u8 = 0;
+var fVolume: u8 = 0;
 fn on_volume_change(elem: ?*c.snd_mixer_elem_t, _: c_uint) callconv(.c) c_int {
     var vol_int: c_long = undefined;
     _ = c.snd_mixer_selem_get_playback_volume(elem, c.SND_MIXER_SCHN_FRONT_LEFT, &vol_int);
     const vol: f64 = @floatFromInt(vol_int);
-    vollevel = @intFromFloat(@round(100 * (vol - vol_min) / (vol_max - vol_min)));
+    fVolume = @intFromFloat(@round(100 * (vol - vol_min) / (vol_max - vol_min)));
     return 0;
 }
 
@@ -78,16 +57,16 @@ fn GetTime() void {
 const DATE_FMT = "%a %d %b %H:%M";
 
 var date_buf: [32]u8 = undefined;
-var datestr: [:0]u8 = undefined;
+var fDateStr: [:0]u8 = undefined;
 fn updateDateStr() void {
     const tm_ptr = c.localtime(&g_ts.tv_sec);
     const n = c.strftime(&date_buf, date_buf.len, DATE_FMT, tm_ptr);
     date_buf[n] = 0;
-    datestr = date_buf[0..n :0];
+    fDateStr = date_buf[0..n :0];
 }
 
 inline fn printTime() void {
-    _ = c.write(1, datestr.ptr, datestr.len);
+    _ = c.write(1, fDateStr.ptr, fDateStr.len);
 }
 
 inline fn printSecs() void {
@@ -98,7 +77,10 @@ const BAT = "/sys/class/power_supply/BAT1/";
 const MAX_EVENTS = 8;
 
 pub fn main() u8 {
-    defer _ = c.puts("BYE!");
+    defer {
+        _ = c.puts("BYE!");
+        _ = c.fflush(c.stdout);
+    }
 
     const epollfd: c_int = c.epoll_create1(0);
     if (epollfd < 0) @panic("epoll_create1");
@@ -131,14 +113,11 @@ pub fn main() u8 {
     // printTime();
     // printSecs();
 
-    // Battery status and capacity
-    bsfd = c.open(BAT ++ "status", c.O_RDONLY);
-    if (bsfd < 0) @panic("open BAT status");
-    defer _ = c.close(bsfd);
+    // Battery capacity
     bcfd = c.open(BAT ++ "capacity", c.O_RDONLY);
-    if (bsfd < 0) @panic("open BAT capacity");
+    if (bcfd < 0) @panic("open BAT capacity");
     defer _ = c.close(bcfd);
-    readBatteryState();
+    readBatCapacity();
 
     // ALSA
     if (c.snd_mixer_open(&mixer, 0) < 0 or
@@ -203,7 +182,7 @@ const EventType = enum(u8) {
                 // printSecs();
                 var buf: [8]u8 = undefined;
                 _ = c.read(timerfd, &buf, 8);
-                readBatteryState();
+                readBatCapacity();
             },
 
             .VolChange => _ = c.snd_mixer_handle_events(mixer),
