@@ -14,7 +14,7 @@ fn print() void {
     _ = c.fflush(c.stdout);
 }
 
-var bcfd: c_int = undefined;
+var bcfd: c_int = -1;
 var fBatCapacity: u8 = 0;
 fn readBatCapacity() void {
     var buf: [8]u8 = undefined;
@@ -47,7 +47,7 @@ fn on_volume_change(elem: ?*c.snd_mixer_elem_t, _: c_uint) callconv(.c) c_int {
     return 0;
 }
 
-var timerfd: c_int = undefined;
+var timerfd: c_int = -1;
 
 var g_ts: c.timespec = undefined;
 fn GetTime() void {
@@ -70,11 +70,6 @@ const BAT = "/sys/class/power_supply/BAT1/";
 const MAX_EVENTS = 8;
 
 pub fn main() u8 {
-    defer {
-        _ = c.puts("BYE!");
-        _ = c.fflush(c.stdout);
-    }
-
     const epollfd: c_int = c.epoll_create1(0);
     if (epollfd < 0) @panic("epoll_create1");
     defer _ = c.close(epollfd);
@@ -84,6 +79,7 @@ pub fn main() u8 {
         @panic("setlocale");
 
     timerfd = c.timerfd_create(c.CLOCK_MONOTONIC, 0);
+    if (timerfd < 0) @panic("timerfd_create");
     defer _ = c.close(timerfd);
 
     GetTime();
@@ -103,7 +99,8 @@ pub fn main() u8 {
         .events = @as(u32, c.EPOLLIN) | c.EPOLLET,
         .data = .{ .u64 = @intFromEnum(EventType.TimeOut1m) },
     };
-    _ = c.epoll_ctl(epollfd, c.EPOLL_CTL_ADD, timerfd, &event);
+    if (c.epoll_ctl(epollfd, c.EPOLL_CTL_ADD, timerfd, &event) < 0)
+        @panic("epoll_ctl");
 
     updateDateStr();
 
@@ -111,6 +108,7 @@ pub fn main() u8 {
     bcfd = c.open(BAT ++ "capacity", c.O_RDONLY);
     if (bcfd < 0) @panic("open BAT capacity");
     defer _ = c.close(bcfd);
+
     readBatCapacity();
 
     // ALSA
@@ -146,7 +144,8 @@ pub fn main() u8 {
             .events = @as(u32, c.EPOLLIN) | c.EPOLLET,
             .data = .{ .u64 = @intFromEnum(EventType.VolChange) },
         };
-        _ = c.epoll_ctl(epollfd, c.EPOLL_CTL_ADD, pfds[i].fd, &event);
+        if (c.epoll_ctl(epollfd, c.EPOLL_CTL_ADD, pfds[i].fd, &event) < 0)
+            @panic("epoll_ctl");
     }
 
     print();
