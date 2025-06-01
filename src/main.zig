@@ -80,7 +80,8 @@ pub fn main() u8 {
     defer _ = c.close(epollfd);
 
     // Date and time
-    _ = c.setlocale(c.LC_TIME, "");
+    if (c.setlocale(c.LC_TIME, "") == null)
+        @panic("setlocale");
 
     timerfd = c.timerfd_create(c.CLOCK_MONOTONIC, 0);
     defer _ = c.close(timerfd);
