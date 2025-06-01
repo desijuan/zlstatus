@@ -1,4 +1,5 @@
 const c = @cImport({
+    @cInclude("locale.h");
     @cInclude("unistd.h");
     @cInclude("stdio.h");
     @cInclude("stdlib.h");
@@ -65,14 +66,6 @@ fn updateDateStr() void {
     fDateStr = date_buf[0..n :0];
 }
 
-inline fn printTime() void {
-    _ = c.write(1, fDateStr.ptr, fDateStr.len);
-}
-
-inline fn printSecs() void {
-    _ = c.printf(":%02d.%d\n", @rem(g_ts.tv_sec, 60), g_ts.tv_nsec);
-}
-
 const BAT = "/sys/class/power_supply/BAT1/";
 const MAX_EVENTS = 8;
 
@@ -87,10 +80,13 @@ pub fn main() u8 {
     defer _ = c.close(epollfd);
 
     // Date and time
+    _ = c.setlocale(c.LC_TIME, "");
+
     timerfd = c.timerfd_create(c.CLOCK_MONOTONIC, 0);
     defer _ = c.close(timerfd);
 
     GetTime();
+
     const itval = c.itimerspec{ .it_value = .{
         .tv_sec = 60 - @rem(g_ts.tv_sec, 60) - 1,
         .tv_nsec = @as(c_long, 1e9) - g_ts.tv_nsec,
@@ -109,9 +105,6 @@ pub fn main() u8 {
     _ = c.epoll_ctl(epollfd, c.EPOLL_CTL_ADD, timerfd, &event);
 
     updateDateStr();
-
-    // printTime();
-    // printSecs();
 
     // Battery capacity
     bcfd = c.open(BAT ++ "capacity", c.O_RDONLY);
@@ -178,8 +171,6 @@ const EventType = enum(u8) {
             .TimeOut1m => {
                 GetTime();
                 updateDateStr();
-                // printTime();
-                // printSecs();
                 var buf: [8]u8 = undefined;
                 _ = c.read(timerfd, &buf, 8);
                 readBatCapacity();
