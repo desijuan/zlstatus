@@ -119,7 +119,6 @@ pub fn main() u8 {
         @panic("Failed to setup ALSA mixer");
     defer _ = c.snd_mixer_close(mixer);
 
-    // Find Master channel
     var elem: ?*c.snd_mixer_elem_t = c.snd_mixer_first_elem(mixer);
     while (elem) |_| : (elem = c.snd_mixer_elem_next(elem)) {
         if (c.strcmp("Master", c.snd_mixer_selem_get_name(elem)) == 0) {
@@ -136,17 +135,15 @@ pub fn main() u8 {
         }
     } else @panic("Master channel not found");
 
-    // Register ALSA fds
-    var pfds: [16]c.pollfd = undefined;
-    const nfds: c_int = c.snd_mixer_poll_descriptors(mixer, &pfds, 16);
-    for (0..@intCast(nfds)) |i| {
-        event = c.epoll_event{
-            .events = @as(u32, c.EPOLLIN) | c.EPOLLET,
-            .data = .{ .u64 = @intFromEnum(EventType.VolChange) },
-        };
-        if (c.epoll_ctl(epollfd, c.EPOLL_CTL_ADD, pfds[i].fd, &event) < 0)
-            @panic("epoll_ctl");
-    }
+    var alsafd: c.pollfd = undefined;
+    if (c.snd_mixer_poll_descriptors(mixer, &alsafd, 1) != 1)
+        @panic("snd_mixer_poll_descriptors");
+    event = c.epoll_event{
+        .events = @as(u32, c.EPOLLIN) | c.EPOLLET,
+        .data = .{ .u64 = @intFromEnum(EventType.VolChange) },
+    };
+    if (c.epoll_ctl(epollfd, c.EPOLL_CTL_ADD, alsafd.fd, &event) < 0)
+        @panic("epoll_ctl");
 
     print();
 
