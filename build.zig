@@ -11,6 +11,8 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
 
+    // TODO: coditionally add X11
+    mod.linkSystemLibrary("X11", .{});
     mod.linkSystemLibrary("asound", .{});
 
     const exe = b.addExecutable(.{

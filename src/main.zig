@@ -9,19 +9,51 @@ const c = @cImport({
     @cInclude("sys/epoll.h");
 });
 
-var buffer: [48]u8 = undefined;
-fn print() void {
+const Mode = enum { X11, Wayland };
+const mode: Mode = .X11;
+
+const Out = switch (mode) {
+    .X11 => struct {
+        const x = @cImport(@cInclude("X11/Xlib.h"));
+
+        var display: ?*x.Display = null;
+
+        fn init() void {
+            display = x.XOpenDisplay(null);
+            if (display == null) @panic("XOpenDisplay");
+        }
+
+        fn deinit() void {
+            x.XStoreName(display, x.DefaultRootWindow(display), null);
+            if (x.XCloseDisplay(display) < 0) @panic("XCloseDisplay");
+        }
+
+        fn print() void {
+            if (x.XStoreName(display, x.DefaultRootWindow(display), &status) < 0)
+                @panic("XStoreName");
+            _ = x.XFlush(display);
+        }
+    },
+
+    .Wayland => struct {
+        inline fn print() void {
+            _ = c.puts(&status);
+            _ = c.fflush(c.stdout);
+        }
+    },
+};
+
+var status: [48]u8 = undefined;
+fn updateStatus() void {
     if (c.snprintf(
-        &buffer,
-        buffer.len,
+        &status,
+        status.len,
         " B:%d V:%d%s %s ",
         fBatCapacity,
         fVolume,
         (if (fIsOn) "" else "M").ptr,
         @as([*c]u8, fDateStr.ptr),
-    ) >= buffer.len) @panic("snprintf");
-    _ = c.puts(&buffer);
-    _ = c.fflush(c.stdout);
+    ) >= status.len) @panic("snprintf");
 }
 
 var bcfd: c_int = -1;
@@ -90,6 +122,9 @@ const BAT = "/sys/class/power_supply/BAT1/";
 const MAX_EVENTS = 8;
 
 pub fn main() u8 {
+    if (comptime @hasDecl(Out, "init")) Out.init();
+    defer if (comptime @hasDecl(Out, "deinit")) Out.deinit();
+
     const epollfd: c_int = c.epoll_create1(0);
     if (epollfd < 0) @panic("epoll_create1");
     defer _ = c.close(epollfd);
@@ -165,7 +200,8 @@ pub fn main() u8 {
     if (c.epoll_ctl(epollfd, c.EPOLL_CTL_ADD, alsafd.fd, &event) < 0)
         @panic("epoll_ctl");
 
-    print();
+    updateStatus();
+    Out.print();
 
     // Main epoll loop
     var events: [MAX_EVENTS]c.epoll_event = undefined;
@@ -173,7 +209,8 @@ pub fn main() u8 {
         for (0..@intCast(c.epoll_wait(epollfd, &events, MAX_EVENTS, -1))) |i| {
             const ev: c.epoll_event = events[i];
             @as(EventType, @enumFromInt(ev.data.u64)).handleEvent();
-            print();
+            updateStatus();
+            Out.print();
         };
 
     return 0;
