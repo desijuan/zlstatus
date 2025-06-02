@@ -9,8 +9,18 @@ const c = @cImport({
     @cInclude("sys/epoll.h");
 });
 
+var buffer: [48]u8 = undefined;
 fn print() void {
-    _ = c.printf(" B:%d V:%d %s \n", fBatCapacity, fVolume, @as([*c]u8, fDateStr.ptr));
+    if (c.snprintf(
+        &buffer,
+        buffer.len,
+        " B:%d V:%d%s %s ",
+        fBatCapacity,
+        fVolume,
+        (if (fIsOn) "" else "M").ptr,
+        @as([*c]u8, fDateStr.ptr),
+    ) >= buffer.len) @panic("snprintf");
+    _ = c.puts(&buffer);
     _ = c.fflush(c.stdout);
 }
 
@@ -36,14 +46,24 @@ fn readBatCapacity() void {
 }
 
 var mixer: ?*c.snd_mixer_t = null;
-var vol_min: f64 = 0;
-var vol_max: f64 = 0;
+var vol_min: f32 = 0;
+var vol_max: f32 = 0;
+var is_on: c_int = 1;
 var fVolume: u8 = 0;
+var fIsOn: bool = true;
+fn boolFromInt(value: c_int) bool {
+    return switch (value) {
+        0 => false,
+        else => true,
+    };
+}
 fn on_volume_change(elem: ?*c.snd_mixer_elem_t, _: c_uint) callconv(.c) c_int {
     var vol_int: c_long = undefined;
     _ = c.snd_mixer_selem_get_playback_volume(elem, c.SND_MIXER_SCHN_FRONT_LEFT, &vol_int);
     const vol: f64 = @floatFromInt(vol_int);
     fVolume = @intFromFloat(@round(100 * (vol - vol_min) / (vol_max - vol_min)));
+    _ = c.snd_mixer_selem_get_playback_switch(elem, c.SND_MIXER_SCHN_FRONT_LEFT, &is_on);
+    fIsOn = boolFromInt(is_on);
     return 0;
 }
 
@@ -57,7 +77,7 @@ fn GetTime() void {
 
 const DATE_FMT = "%a %d %b %H:%M";
 
-var date_buf: [32]u8 = undefined;
+var date_buf: [24]u8 = undefined;
 var fDateStr: [:0]u8 = undefined;
 fn updateDateStr() void {
     const tm_ptr = c.localtime(&g_ts.tv_sec);
