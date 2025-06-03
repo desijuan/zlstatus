@@ -239,9 +239,9 @@ const EventType = enum(u8) {
         switch (self) {
             .TimeOut1m => {
                 GetTime();
-                updateDateStr();
                 var buf: [8]u8 = undefined;
                 _ = c.read(timerfd, &buf, 8);
+                updateDateStr();
                 readBatCapacity();
             },
 
