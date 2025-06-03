@@ -43,13 +43,18 @@ const Out = switch (out_mode) {
     },
 };
 
+const fmt = " B:%d V:%d%s %s ";
+
 var status_buf: [48]u8 = undefined;
 var status_len: u8 = 0;
 fn updateStatus() void {
     status_len = @intCast(c.snprintf(
         &status_buf,
         status_buf.len,
-        " B:%d V:%d%s %s \n",
+        comptime switch (out_mode) {
+            .X11 => fmt,
+            .Wayland => fmt ++ "\n",
+        },
         fBatCapacity,
         fVolume,
         (if (fIsOn) "" else "M").ptr,
