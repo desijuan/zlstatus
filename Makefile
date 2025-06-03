@@ -6,10 +6,13 @@ debug:
 release:
 	zig build -Doptimize=ReleaseSmall --summary all
 
+clean:
+	rm -rf .zig-cache zig-out
+
 install:
 	cp zig-out/bin/zlstatus /usr/local/bin/
 
 uninstall:
 	rm /usr/local/bin/zlstatus
 
-.PHONY: debug release install uninstall
+.PHONY: debug release clean install uninstall

@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const OutMode = enum { X11, Wayland };
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -11,8 +13,13 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
 
-    // TODO: coditionally add X11
-    mod.linkSystemLibrary("X11", .{});
+    const out_mode: OutMode = b.option(OutMode, "mode", "X11 or Wayland") orelse .Wayland;
+
+    const options = b.addOptions();
+    options.addOption(OutMode, "out_mode", out_mode);
+    mod.addOptions("config", options);
+
+    if (out_mode == .X11) mod.linkSystemLibrary("X11", .{});
     mod.linkSystemLibrary("asound", .{});
 
     const exe = b.addExecutable(.{
@@ -23,7 +30,6 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
-
     run_cmd.step.dependOn(b.getInstallStep());
 
     if (b.args) |args| {

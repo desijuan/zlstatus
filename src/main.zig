@@ -9,51 +9,57 @@ const c = @cImport({
     @cInclude("sys/epoll.h");
 });
 
-const Mode = enum { X11, Wayland };
-const mode: Mode = .X11;
+const config = @import("config");
+const OutMode: type = config.@"build.OutMode";
+const out_mode: OutMode = config.out_mode;
 
-const Out = switch (mode) {
+const Out = switch (out_mode) {
     .X11 => struct {
         const x = @cImport(@cInclude("X11/Xlib.h"));
 
         var display: ?*x.Display = null;
 
-        fn init() void {
+        inline fn init() void {
             display = x.XOpenDisplay(null);
             if (display == null) @panic("XOpenDisplay");
         }
 
-        fn deinit() void {
+        inline fn deinit() void {
             x.XStoreName(display, x.DefaultRootWindow(display), null);
             if (x.XCloseDisplay(display) < 0) @panic("XCloseDisplay");
+            display = null;
         }
 
-        fn print() void {
-            if (x.XStoreName(display, x.DefaultRootWindow(display), &status) < 0)
-                @panic("XStoreName");
+        inline fn print() void {
+            if (x.XStoreName(display, x.DefaultRootWindow(display), &status_buf) < 0) @panic("XStoreName");
             _ = x.XFlush(display);
         }
     },
 
     .Wayland => struct {
         inline fn print() void {
-            _ = c.puts(&status);
-            _ = c.fflush(c.stdout);
+            _ = c.write(1, &status_buf, status_len);
         }
     },
 };
 
-var status: [48]u8 = undefined;
+var status_buf: [48]u8 = undefined;
+var status_len: u8 = 0;
 fn updateStatus() void {
-    if (c.snprintf(
-        &status,
-        status.len,
-        " B:%d V:%d%s %s ",
+    status_len = @intCast(c.snprintf(
+        &status_buf,
+        status_buf.len,
+        " B:%d V:%d%s %s \n",
         fBatCapacity,
         fVolume,
         (if (fIsOn) "" else "M").ptr,
         @as([*c]u8, fDateStr.ptr),
-    ) >= status.len) @panic("snprintf");
+    ));
+    if (status_len >= status_buf.len) @panic("snprintf");
+}
+fn sayBye() void {
+    status_len = @intCast(c.snprintf(&status_buf, status_buf.len, "Bye!\n"));
+    if (status_len >= status_buf.len) @panic("snprintf");
 }
 
 var bcfd: c_int = -1;
@@ -123,7 +129,11 @@ const MAX_EVENTS = 8;
 
 pub fn main() u8 {
     if (comptime @hasDecl(Out, "init")) Out.init();
-    defer if (comptime @hasDecl(Out, "deinit")) Out.deinit();
+    defer {
+        sayBye();
+        Out.print();
+        if (comptime @hasDecl(Out, "deinit")) Out.deinit();
+    }
 
     const epollfd: c_int = c.epoll_create1(0);
     if (epollfd < 0) @panic("epoll_create1");
