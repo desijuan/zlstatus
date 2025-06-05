@@ -31,40 +31,51 @@ const Out = switch (out_mode) {
         }
 
         inline fn print() void {
-            if (x.XStoreName(display, x.DefaultRootWindow(display), &status_buf) < 0) @panic("XStoreName");
+            if (x.XStoreName(display, x.DefaultRootWindow(display), fStatus.ptr) < 0) @panic("XStoreName");
             _ = x.XFlush(display);
         }
     },
 
     .Wayland => struct {
         inline fn print() void {
-            _ = c.write(1, &status_buf, status_len);
+            _ = c.write(1, fStatus.ptr, fStatus.len);
         }
     },
 };
 
-const fmt = " B:%d V:%d%s %s ";
+const FMT_BATVOL = " B:%d V:%d%s ";
+const FMT_DATE = "%a %d %b %H:%M ";
 
-var status_buf: [48]u8 = undefined;
-var status_len: u8 = 0;
+const BUF_LEN = 32;
+var status_buf: [BUF_LEN]u8 = undefined;
+var fStatus: [:0]u8 = undefined;
 fn updateStatus() void {
-    status_len = @intCast(c.snprintf(
-        &status_buf,
-        status_buf.len,
-        comptime switch (out_mode) {
-            .X11 => fmt,
-            .Wayland => fmt ++ "\n",
-        },
+    const buf1: []u8 = status_buf[0..];
+    const n1: usize = @intCast(c.snprintf(
+        buf1.ptr,
+        buf1.len,
+        FMT_BATVOL,
         fBatCapacity,
         fVolume,
         (if (fIsOn) "" else "M").ptr,
-        @as([*c]u8, fDateStr.ptr),
     ));
-    if (status_len >= status_buf.len) @panic("snprintf");
+    if (n1 >= buf1.len) @panic("snprintf");
+
+    const buf2: []u8 = status_buf[n1..];
+    const tm_ptr = c.gmtime(&g_ts.tv_sec);
+    const n2: usize = c.strftime(buf2.ptr, buf2.len, FMT_DATE, tm_ptr);
+    if (n2 >= buf2.len) @panic("strftime");
+
+    const n = n1 + n2;
+    status_buf[n] = '\n';
+    status_buf[n + 1] = 0;
+
+    fStatus = status_buf[0 .. n + 1 :0];
 }
 fn sayBye() void {
-    status_len = @intCast(c.snprintf(&status_buf, status_buf.len, "Bye!\n"));
-    if (status_len >= status_buf.len) @panic("snprintf");
+    const n: usize = c.snprintf(&status_buf, status_buf.len, "Bye!\n");
+    if (n >= status_buf.len) @panic("snprintf");
+    fStatus = status_buf[0..n :0];
 }
 
 var bcfd: c_int = -1;
@@ -118,17 +129,6 @@ fn GetTime() void {
         @panic("clock_gettime");
 }
 
-const DATE_FMT = "%a %d %b %H:%M";
-
-var date_buf: [24]u8 = undefined;
-var fDateStr: [:0]u8 = undefined;
-fn updateDateStr() void {
-    const tm_ptr = c.localtime(&g_ts.tv_sec);
-    const n = c.strftime(&date_buf, date_buf.len, DATE_FMT, tm_ptr);
-    date_buf[n] = 0;
-    fDateStr = date_buf[0..n :0];
-}
-
 const BAT = "/sys/class/power_supply/BAT1/";
 const MAX_EVENTS = 8;
 
@@ -171,8 +171,6 @@ pub fn main() u8 {
     };
     if (c.epoll_ctl(epollfd, c.EPOLL_CTL_ADD, timerfd, &event) < 0)
         @panic("epoll_ctl");
-
-    updateDateStr();
 
     // Battery capacity
     bcfd = c.open(BAT ++ "capacity", c.O_RDONLY);
@@ -241,7 +239,6 @@ const EventType = enum(u8) {
                 GetTime();
                 var buf: [8]u8 = undefined;
                 _ = c.read(timerfd, &buf, 8);
-                updateDateStr();
                 readBatCapacity();
             },
 
