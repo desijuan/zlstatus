@@ -25,8 +25,8 @@ const Out: type = switch (out_mode) {
         }
 
         inline fn deinit() void {
-            x.XStoreName(display, x.DefaultRootWindow(display), null);
-            if (x.XCloseDisplay(display) < 0) @panic("XCloseDisplay");
+            _ = x.XStoreName(display, x.DefaultRootWindow(display), null);
+            _ = x.XCloseDisplay(display);
             display = null;
         }
 
@@ -84,10 +84,9 @@ var fBatCapacity: u8 = 0;
 fn readBatCapacity() void {
     var buf: [8]u8 = undefined;
     _ = c.lseek(bcfd, 0, c.SEEK_SET);
-    const nread: i8 = @intCast(c.read(bcfd, &buf, 8));
-    if (nread < 1) @panic("read bcfd");
+    const n: usize = @intCast(c.read(bcfd, &buf, 8));
+    if (n < 1) @panic("read bcfd");
 
-    const n: usize = @intCast(nread);
     if (buf[n - 1] == '\n')
         buf[n - 1] = 0
     else
@@ -115,7 +114,7 @@ fn boolFromInt(value: c_int) bool {
 fn readMasterVolume(elem: ?*c.snd_mixer_elem_t, _: c_uint) callconv(.c) c_int {
     var vol_int: c_long = undefined;
     _ = c.snd_mixer_selem_get_playback_volume(elem, c.SND_MIXER_SCHN_FRONT_LEFT, &vol_int);
-    const vol: f64 = @floatFromInt(vol_int);
+    const vol: f32 = @floatFromInt(vol_int);
     fVolume = @intFromFloat(@round(100 * (vol - vol_min) / (vol_max - vol_min)));
     _ = c.snd_mixer_selem_get_playback_switch(elem, c.SND_MIXER_SCHN_FRONT_LEFT, &is_on);
     fIsOn = boolFromInt(is_on);
