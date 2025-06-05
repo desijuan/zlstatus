@@ -78,11 +78,6 @@ fn setStatus() void {
         },
     };
 }
-fn setStatusBye() void {
-    const n: usize = c.snprintf(&status_buf, status_buf.len, "Bye!\n");
-    if (n >= status_buf.len) @panic("snprintf");
-    fStatus = status_buf[0..n :0];
-}
 
 var bcfd: c_int = -1;
 var fBatCapacity: u8 = 0;
@@ -140,11 +135,7 @@ const MAX_EVENTS = 8;
 
 pub fn main() u8 {
     if (comptime @hasDecl(Out, "init")) Out.init();
-    defer {
-        setStatusBye();
-        Out.write();
-        if (comptime @hasDecl(Out, "deinit")) Out.deinit();
-    }
+    defer if (comptime @hasDecl(Out, "deinit")) Out.deinit();
 
     const epollfd: c_int = c.epoll_create1(0);
     if (epollfd < 0) @panic("epoll_create1");
