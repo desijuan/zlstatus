@@ -13,7 +13,7 @@ const config = @import("config");
 const OutMode: type = config.@"build.OutMode";
 const out_mode: OutMode = config.out_mode;
 
-const Out = switch (out_mode) {
+const Out: type = switch (out_mode) {
     .X11 => struct {
         const x = @cImport(@cInclude("X11/Xlib.h"));
 
@@ -30,14 +30,14 @@ const Out = switch (out_mode) {
             display = null;
         }
 
-        inline fn print() void {
+        inline fn write() void {
             if (x.XStoreName(display, x.DefaultRootWindow(display), fStatus.ptr) < 0) @panic("XStoreName");
             _ = x.XFlush(display);
         }
     },
 
     .Wayland => struct {
-        inline fn print() void {
+        inline fn write() void {
             _ = c.write(1, fStatus.ptr, fStatus.len);
         }
     },
@@ -49,7 +49,7 @@ const FMT_DATE = "%a %d %b %H:%M ";
 const BUF_LEN = 32;
 var status_buf: [BUF_LEN]u8 = undefined;
 var fStatus: [:0]u8 = undefined;
-fn updateStatus() void {
+fn setStatus() void {
     const buf1: []u8 = status_buf[0..];
     const n1: usize = @intCast(c.snprintf(
         buf1.ptr,
@@ -62,17 +62,23 @@ fn updateStatus() void {
     if (n1 >= buf1.len) @panic("snprintf");
 
     const buf2: []u8 = status_buf[n1..];
-    const tm_ptr = c.gmtime(&g_ts.tv_sec);
+    const tm_ptr = c.localtime(&fTime.tv_sec);
     const n2: usize = c.strftime(buf2.ptr, buf2.len, FMT_DATE, tm_ptr);
     if (n2 >= buf2.len) @panic("strftime");
 
     const n = n1 + n2;
-    status_buf[n] = '\n';
-    status_buf[n + 1] = 0;
-
-    fStatus = status_buf[0 .. n + 1 :0];
+    return switch (comptime out_mode) {
+        .X11 => {
+            fStatus = status_buf[0..n :0];
+        },
+        .Wayland => {
+            status_buf[n] = '\n';
+            status_buf[n + 1] = 0;
+            fStatus = status_buf[0 .. n + 1 :0];
+        },
+    };
 }
-fn sayBye() void {
+fn setStatusBye() void {
     const n: usize = c.snprintf(&status_buf, status_buf.len, "Bye!\n");
     if (n >= status_buf.len) @panic("snprintf");
     fStatus = status_buf[0..n :0];
@@ -111,7 +117,7 @@ fn boolFromInt(value: c_int) bool {
         else => true,
     };
 }
-fn on_volume_change(elem: ?*c.snd_mixer_elem_t, _: c_uint) callconv(.c) c_int {
+fn readMasterVolume(elem: ?*c.snd_mixer_elem_t, _: c_uint) callconv(.c) c_int {
     var vol_int: c_long = undefined;
     _ = c.snd_mixer_selem_get_playback_volume(elem, c.SND_MIXER_SCHN_FRONT_LEFT, &vol_int);
     const vol: f64 = @floatFromInt(vol_int);
@@ -123,9 +129,9 @@ fn on_volume_change(elem: ?*c.snd_mixer_elem_t, _: c_uint) callconv(.c) c_int {
 
 var timerfd: c_int = -1;
 
-var g_ts: c.timespec = undefined;
-fn GetTime() void {
-    if (c.clock_gettime(c.CLOCK_REALTIME, &g_ts) != 0)
+var fTime: c.timespec = undefined;
+fn readTime() void {
+    if (c.clock_gettime(c.CLOCK_REALTIME, &fTime) != 0)
         @panic("clock_gettime");
 }
 
@@ -135,8 +141,8 @@ const MAX_EVENTS = 8;
 pub fn main() u8 {
     if (comptime @hasDecl(Out, "init")) Out.init();
     defer {
-        sayBye();
-        Out.print();
+        setStatusBye();
+        Out.write();
         if (comptime @hasDecl(Out, "deinit")) Out.deinit();
     }
 
@@ -152,11 +158,11 @@ pub fn main() u8 {
     if (timerfd < 0) @panic("timerfd_create");
     defer _ = c.close(timerfd);
 
-    GetTime();
+    readTime();
 
     const itval = c.itimerspec{ .it_value = .{
-        .tv_sec = 60 - @rem(g_ts.tv_sec, 60) - 1,
-        .tv_nsec = @as(c_long, 1e9) - g_ts.tv_nsec,
+        .tv_sec = 60 - @rem(fTime.tv_sec, 60) - 1,
+        .tv_nsec = @as(c_long, 1e9) - fTime.tv_nsec,
     }, .it_interval = .{
         .tv_sec = 60,
         .tv_nsec = 0,
@@ -196,8 +202,8 @@ pub fn main() u8 {
             vol_min = @floatFromInt(min);
             vol_max = @floatFromInt(max);
 
-            c.snd_mixer_elem_set_callback(elem, on_volume_change);
-            _ = on_volume_change(elem, 0);
+            c.snd_mixer_elem_set_callback(elem, readMasterVolume);
+            _ = readMasterVolume(elem, 0);
 
             break;
         }
@@ -213,8 +219,8 @@ pub fn main() u8 {
     if (c.epoll_ctl(epollfd, c.EPOLL_CTL_ADD, alsafd.fd, &event) < 0)
         @panic("epoll_ctl");
 
-    updateStatus();
-    Out.print();
+    setStatus();
+    Out.write();
 
     // Main epoll loop
     var events: [MAX_EVENTS]c.epoll_event = undefined;
@@ -222,8 +228,8 @@ pub fn main() u8 {
         for (0..@intCast(c.epoll_wait(epollfd, &events, MAX_EVENTS, -1))) |i| {
             const ev: c.epoll_event = events[i];
             @as(EventType, @enumFromInt(ev.data.u64)).handleEvent();
-            updateStatus();
-            Out.print();
+            setStatus();
+            Out.write();
         };
 
     return 0;
@@ -236,7 +242,7 @@ const EventType = enum(u8) {
     fn handleEvent(self: EventType) void {
         switch (self) {
             .TimeOut1m => {
-                GetTime();
+                readTime();
                 var buf: [8]u8 = undefined;
                 _ = c.read(timerfd, &buf, 8);
                 readBatCapacity();
