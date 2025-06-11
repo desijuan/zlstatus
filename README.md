@@ -100,3 +100,7 @@ and have Pulseaudio or Pipewire, it may not work correctly. Perhaps in the futur
 to say that I don't like the idea of having an audio server on top of ALSA at all. So, perhaps this never happens xP.
 Other than that, if you use only ALSA like me, it should work. Other than ALSA it only depends on epoll(7), which should
 be available in any (somewhat) modern Linux installation.
+
+## License
+
+zlstatus is released under the [MIT License](./LICENSE).
